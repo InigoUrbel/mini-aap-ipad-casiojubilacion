@@ -25,7 +25,7 @@ html, body { width:100%; height:100%; background:#030303; overflow:hidden; -webk
 .app-boot    { animation: bootup .6s ease-out; }
 .blink-colon { animation: blink-c 1s step-end infinite; }
 .no-sel      { -webkit-user-select:none; user-select:none; }
-.scanlines   { position:absolute; top:0; left:0; right:0; bottom:0; pointer-events:none; z-index:1; border-radius:2px; animation:scan .4s linear infinite; }
+.scanlines   { position:absolute; top:0; left:0; right:0; bottom:0; pointer-events:none; z-index:1; border-radius:2px; animation:scan .4s linear infinite; will-change:transform; -webkit-backface-visibility:hidden; backface-visibility:hidden; }
 .lcd-reflect { position:absolute; top:0; left:0; right:0; height:28%; border-radius:2px 2px 50% 50%; pointer-events:none; z-index:2; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/16.14.0/umd/react.production.min.js"></script>
@@ -105,24 +105,110 @@ function wkNum(d){
   var y0=new Date(Date.UTC(u.getUTCFullYear(),0,1));
   return Math.ceil(((u-y0)/86400000+1)/7);
 }
-var WMO={0:{l:"DESPEJADO",i:"☀"},1:{l:"CASI DESP.",i:"🌤"},2:{l:"PARCIALM.",i:"⛅"},3:{l:"NUBLADO",i:"☁"},45:{l:"NIEBLA",i:"🌫"},51:{l:"LLOVIZNA",i:"🌦"},61:{l:"LLUVIA L.",i:"🌧"},63:{l:"LLUVIA M.",i:"🌧"},65:{l:"LLUVIA F.",i:"🌧"},71:{l:"NIEVE L.",i:"🌨"},80:{l:"CHUBASCO",i:"🌦"},95:{l:"TORMENTA",i:"⛈"}};
-function getWmo(c){return WMO[c]||WMO[Math.floor(c/10)*10]||{l:"---",i:"?"};}
+var WMO={
+  0:{l:"DESPEJADO",i:"☀"},
+  1:{l:"CASI DESP.",i:"🌤"}, 2:{l:"PARCIALM.",i:"⛅"}, 3:{l:"NUBLADO",i:"☁"},
+  45:{l:"NIEBLA",i:"🌫"}, 48:{l:"NIEBLA ESCARCHA",i:"🌫"},
+  51:{l:"LLOVIZNA L.",i:"🌦"}, 53:{l:"LLOVIZNA M.",i:"🌦"}, 55:{l:"LLOVIZNA F.",i:"🌧"},
+  56:{l:"LLOVIZNA HELADA",i:"🌧"}, 57:{l:"LLOVIZNA HELADA F.",i:"🌧"},
+  61:{l:"LLUVIA L.",i:"🌧"}, 63:{l:"LLUVIA M.",i:"🌧"}, 65:{l:"LLUVIA F.",i:"🌧"},
+  66:{l:"LLUVIA HELADA L.",i:"🌧"}, 67:{l:"LLUVIA HELADA F.",i:"🌧"},
+  71:{l:"NIEVE L.",i:"🌨"}, 73:{l:"NIEVE M.",i:"🌨"}, 75:{l:"NIEVE F.",i:"❄"},
+  77:{l:"GRANIZO NIEVE",i:"🌨"},
+  80:{l:"CHUBASCO L.",i:"🌦"}, 81:{l:"CHUBASCO M.",i:"🌦"}, 82:{l:"CHUBASCO F.",i:"⛈"},
+  85:{l:"NEVADA L.",i:"🌨"}, 86:{l:"NEVADA F.",i:"❄"},
+  95:{l:"TORMENTA",i:"⛈"}, 96:{l:"TORMENTA+GRANIZO",i:"⛈"}, 99:{l:"TORMENTA+GRANIZO F.",i:"⛈"}
+};
+function getWmo(c){return WMO[c]||{l:"---",i:"🌡"};}
 function windCompass(deg){
   if(deg===undefined||deg===null)return "";
   var dirs=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSO","SO","OSO","O","ONO","NO","NNO"];
   return dirs[Math.round(deg/22.5)%16];
 }
+
+/* ─── Pascua (algoritmo anónimo gregoriano) ──────────────────────────────── */
+function easterDate(y){
+  var a=y%19,b=Math.floor(y/100),c=y%100;
+  var d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25);
+  var g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30;
+  var i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7;
+  var m=Math.floor((a+11*h+22*l)/451);
+  var month=Math.floor((h+l-7*m+114)/31);
+  var day=((h+l-7*m+114)%31)+1;
+  return new Date(y,month-1,day);
+}
+
+/* ─── Festivos nacionales España (año y) ─────────────────────────────────── */
+function spainHolidays(y){
+  var easter=easterDate(y);
+  var goodFriday=new Date(easter); goodFriday.setDate(easter.getDate()-2);
+  var fixed=[
+    new Date(y,0,1),   // Año Nuevo
+    new Date(y,0,6),   // Reyes
+    new Date(y,4,1),   // Día del Trabajador
+    new Date(y,7,15),  // Asunción
+    new Date(y,9,12),  // Fiesta Nacional
+    new Date(y,10,1),  // Todos los Santos
+    new Date(y,11,6),  // Constitución
+    new Date(y,11,8),  // Inmaculada
+    new Date(y,11,25), // Navidad
+    goodFriday,        // Viernes Santo
+  ];
+  var set={};
+  fixed.forEach(function(d){
+    set[d.getFullYear()+"-"+d.getMonth()+"-"+d.getDate()]=true;
+  });
+  return set;
+}
+
+/* ─── Días laborables entre hoy y target ────────────────────────────────── */
+function workingDays(targetDate){
+  var today=new Date(); today.setHours(0,0,0,0);
+  var target=new Date(targetDate); target.setHours(0,0,0,0);
+  if(target<=today) return 0;
+  var holidays={};
+  var y0=today.getFullYear(), y1=target.getFullYear();
+  for(var y=y0;y<=y1;y++){
+    var h=spainHolidays(y);
+    Object.keys(h).forEach(function(k){holidays[k]=true;});
+  }
+  var count=0;
+  var cur=new Date(today); cur.setDate(cur.getDate()+1);
+  while(cur<=target){
+    var dow=cur.getDay();
+    var key=cur.getFullYear()+"-"+cur.getMonth()+"-"+cur.getDate();
+    if(dow!==0&&dow!==6&&!holidays[key]) count++;
+    cur.setDate(cur.getDate()+1);
+  }
+  return count;
+}
 /* ─── SVG 7-seg ───────────────────────────────────────────────────────────── */
 var SB={"0":[1,1,1,1,1,1,0],"1":[0,1,1,0,0,0,0],"2":[1,1,0,1,1,0,1],"3":[1,1,1,1,0,0,1],"4":[0,1,1,0,0,1,1],"5":[1,0,1,1,0,1,1],"6":[1,0,1,1,1,1,1],"7":[1,1,1,0,0,0,0],"8":[1,1,1,1,1,1,1],"9":[1,1,1,1,0,1,1],"-":[0,0,0,0,0,0,1]," ":[0,0,0,0,0,0,0]};
 function Seg(p){
-  var digit=p.d||"8",W=p.W||68,H=p.H||110,onC=p.on,offC=p.off,gf=p.gf||"none";
+  var digit=p.d||"8",W=p.W||68,H=p.H||110,onC=p.on,offC=p.off,hasGlow=p.glow||false,glowCol=p.glowCol||"#38c8ff";
   var T=Math.round(W*.13),G=Math.round(W*.05),B=Math.round(T*.38),mid=H/2;
   var bits=SB[String(digit)]||[0,0,0,0,0,0,0];
   function hb(x1,x2,y){return [[x1+B,y],[x2-B,y],[x2,y+T/2],[x2-B,y+T],[x1+B,y+T],[x1,y+T/2]].map(function(p){return p.join(",");}).join(" ");}
   function vb(x,y1,y2){return [[x+T/2,y1],[x+T,y1+B],[x+T,y2-B],[x+T/2,y2],[x,y2-B],[x,y1+B]].map(function(p){return p.join(",");}).join(" ");}
   var segs=[hb(G+T,W-G-T,G),vb(W-G-T,G+T+G,mid-G),vb(W-G-T,mid+G,H-G-T-G),hb(G+T,W-G-T,H-G-T),vb(G,mid+G,H-G-T-G),vb(G,G+T+G,mid-G),hb(G+T,W-G-T,mid-T/2)];
-  return React.createElement("svg",{width:W,height:H,viewBox:"0 0 "+W+" "+H,style:{display:"block",flexShrink:0,filter:gf}},
-    segs.map(function(pts,i){return React.createElement("polygon",{key:i,points:pts,fill:bits[i]?onC:offC});}));
+  var uid="sg"+W+""+H+(digit||"8").replace(/[^a-z0-9]/gi,"x");
+  return (
+    <svg width={W} height={H} viewBox={"0 0 "+W+" "+H} style={{display:"block",flexShrink:0}}>
+      {hasGlow && (
+        <defs>
+          <filter id={uid} x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+            <feFlood floodColor={glowCol} floodOpacity="0.7" result="color"/>
+            <feComposite in="color" in2="blur" operator="in" result="glow"/>
+            <feMerge><feMergeNode in="glow"/><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+      )}
+      <g filter={hasGlow ? "url(#"+uid+")" : undefined}>
+        {segs.map(function(pts,i){return <polygon key={i} points={pts} fill={bits[i]?onC:offC}/>;} )}
+      </g>
+    </svg>
+  );
 }
 
 /* ─── DSEG span ───────────────────────────────────────────────────────────── */
@@ -130,10 +216,10 @@ function DS(p){
   var T=p.t,sz=p.sz||40,val=p.v,gh=p.g,ls=p.ls||".04em";
   var gf={};
   if(T.glow){
-    var f=T.id==="bw"
-      ?"drop-shadow(0 0 9px rgba(255,255,255,.6)) drop-shadow(0 0 22px rgba(255,255,255,.28))"
-      :"drop-shadow(0 0 6px "+T.glowColor+") drop-shadow(0 0 16px "+T.glowColor+")";
-    gf={WebkitFilter:f,filter:f};
+    var ts=T.id==="bw"
+      ?"0 0 6px rgba(255,255,255,.7),0 0 18px rgba(255,255,255,.3)"
+      :"0 0 5px "+T.glowColor+",0 0 14px "+T.glowColor;
+    gf={textShadow:ts};
   }
   return (
     <span style={{position:"relative",display:"inline-block"}}>
@@ -158,6 +244,7 @@ function VD(p){
   var col=p.col||"rgba(255,255,255,.12)";
   return <div style={{width:1,alignSelf:"stretch",background:"linear-gradient(180deg,transparent,"+col+" 15%,"+col+" 85%,transparent)",margin:"0 "+(p.mx||14)+"px",flexShrink:0}}/>;
 }
+
 
 /* ─── Side button ─────────────────────────────────────────────────────────── */
 function SBtn(p){
@@ -205,6 +292,7 @@ function LCD(p){
   var time=p.time,config=p.config,wx=p.weather,T=p.t,onSet=p.onSet;
 
   var hh=pad(time.getHours()),mm=pad(time.getMinutes()),ss=pad(time.getSeconds());
+  var blinkOn=time.getSeconds()%2===0;
   var dayL=DAYS[time.getDay()],dd=pad(time.getDate()),mon=MONTHS[time.getMonth()],yyyy=time.getFullYear(),wk=wkNum(time);
 
   var tgt=new Date(config.targetDate); tgt.setHours(0,0,0,0);
@@ -213,15 +301,12 @@ function LCD(p){
   var abs=Math.min(Math.abs(diff),9999);
   var d4=pad(abs,4);
   var isPast=diff<0;
+  var wDays=isPast?0:workingDays(config.targetDate);
+  var wd4=pad(Math.min(wDays,9999),4);
 
-  var gf="none";
-  if(T.glow){
-    gf=T.id==="bw"
-      ?"drop-shadow(0 0 9px rgba(255,255,255,.55)) drop-shadow(0 0 22px rgba(255,255,255,.22))"
-      :"drop-shadow(0 0 5px "+T.glowColor+") drop-shadow(0 0 14px "+T.glowColor+")";
-  }
+
   var cgf={};
-  if(T.glow){var cf=T.id==="bw"?"drop-shadow(0 0 9px rgba(255,255,255,.6)) drop-shadow(0 0 22px rgba(255,255,255,.28))":"drop-shadow(0 0 6px "+T.glowColor+") drop-shadow(0 0 16px "+T.glowColor+")";cgf={WebkitFilter:cf,filter:cf};}
+  if(T.glow){var cts=T.id==="bw"?"0 0 6px rgba(255,255,255,.7),0 0 18px rgba(255,255,255,.3)":"0 0 6px "+T.glowColor+",0 0 16px "+T.glowColor;cgf={textShadow:cts};}
 
   var fr=time.getHours()+time.getMinutes()/60;
   var traf=0.05;
@@ -260,15 +345,31 @@ function LCD(p){
       {/* ══════════════════════════════════════════════════════════════════════
           ROW 1 — COUNTDOWN (hero, full width)
       ═══════════════════════════════════════════════════════════════════════ */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:20,flexShrink:0,position:"relative",zIndex:3,paddingBottom:8}}>
+      <div style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"center",gap:20,flexShrink:0,zIndex:3,paddingBottom:8}}>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          {d4.split("").map(function(ch,i){return <Seg key={i} d={ch} W={90} H={140} on={T.segOn} off={T.segOff} gf={gf}/>;})}
+          {d4.split("").map(function(ch,i){return <Seg key={i} d={ch} W={90} H={140} on={T.segOn} off={T.segOff} glow={T.glow} glowCol={T.glowColor}/>;})}
         </div>
         <div className="no-sel" style={{display:"flex",flexDirection:"column",gap:5}}>
           <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:14,color:T.text,letterSpacing:".2em",lineHeight:1.3}}>DÍAS</span>
           <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:13,color:T.mid,letterSpacing:".14em",lineHeight:1.3}}>{isPast?"TRANSCUR.":"RESTANTES"}</span>
           <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:T.dim,letterSpacing:".1em",lineHeight:1.3,marginTop:5}}>{config.label||"CUENTA ATRÁS"}</span>
         </div>
+        {/* ── Días laborables — esquina inferior derecha absoluta ── */}
+        {!isPast && (
+          <div className="no-sel" style={{
+            position:"absolute",bottom:8,right:0,
+            display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3,
+            paddingLeft:14,borderLeft:"1px solid "+T.div,
+          }}>
+            <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:T.dim,letterSpacing:".13em",lineHeight:1}}>LABORABLES · CAL.ESP.</span>
+            <div style={{display:"flex",gap:3,alignItems:"center"}}>
+              {wd4.split("").map(function(ch,i){
+                return <Seg key={i} d={ch} W={28} H={44} on={T.segOn} off={T.segOff} glow={T.glow} glowCol={T.glowColor}/>;
+              })}
+              <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:T.mid,letterSpacing:".08em",marginLeft:4}}>DÍAS</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <HD col={T.div} my={0}/>
@@ -284,12 +385,12 @@ function LCD(p){
           {/* HH:MM big */}
           <div style={{display:"flex",alignItems:"baseline",marginTop:6}}>
             <DS t={T} v={hh} g="88" sz={72}/>
-            <span className={"blink-colon no-sel"} style={{fontFamily:"'DSEG7Classic',monospace",fontSize:66,lineHeight:1,color:T.dsegOn,margin:"0 2px",...cgf}}>:</span>
+            <span className="no-sel" style={{fontFamily:"'DSEG7Classic',monospace",fontSize:66,lineHeight:1,color:T.dsegOn,margin:"0 2px",opacity:blinkOn?1:0.08,...cgf}}>:</span>
             <DS t={T} v={mm} g="88" sz={72}/>
           </div>
           {/* :SS + day */}
           <div style={{display:"flex",alignItems:"baseline",gap:8,marginTop:3}}>
-            <span className={"blink-colon no-sel"} style={{fontFamily:"'DSEG7Classic',monospace",fontSize:28,lineHeight:1,color:T.dsegOn,opacity:.65,...cgf}}>:</span>
+            <span className="no-sel" style={{fontFamily:"'DSEG7Classic',monospace",fontSize:28,lineHeight:1,color:T.dsegOn,opacity:blinkOn?0.65:0.08,...cgf}}>:</span>
             <DS t={T} v={ss} g="88" sz={32}/>
             <L t={T} sz={12} col={T.mid}>{dayL}</L>
           </div>
@@ -301,7 +402,7 @@ function LCD(p){
         <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",gap:0}}>
           <L t={T} sz={10}>TEMPERATURA</L>
           <div style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:6}}>
-            <span style={{fontSize:42,lineHeight:1}}>{wx ? getWmo(wx.code).i : "—"}</span>
+            <span style={{fontSize:44,lineHeight:1,display:"block"}}>{wx ? getWmo(wx.code).i : "🌡"}</span>
             <div style={{display:"flex",alignItems:"flex-start"}}>
               <DS t={T} v={wx ? String(Math.round(wx.temp)) : "--"} g={wx ? "8".repeat(String(Math.round(wx.temp)).length) : "88"} sz={88}/>
               <span className="no-sel" style={{fontFamily:"'Share Tech Mono',monospace",fontSize:26,color:T.text,letterSpacing:".06em",marginTop:4}}>°C</span>
@@ -309,32 +410,32 @@ function LCD(p){
           </div>
           {wx && <L t={T} sz={13} col={T.mid}>{getWmo(wx.code).l}</L>}
           {wx && (
-            <div style={{display:"flex",gap:14,marginTop:8,alignItems:"flex-end"}}>
+            <div style={{display:"flex",width:"100%",marginTop:10,gap:0}}>
               {/* SENS */}
-              <div className="no-sel" style={{textAlign:"center"}}>
+              <div className="no-sel" style={{flex:"1 1 0",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
                 <L t={T} sz={10}>SENS.</L>
-                <div style={{fontFamily:"'DSEG7Classic',monospace",fontSize:26,color:T.text,lineHeight:1.3,marginTop:2,...(T.glow?{WebkitFilter:"drop-shadow(0 0 4px "+T.glowColor+")",filter:"drop-shadow(0 0 4px "+T.glowColor+")"}:{})}}>{Math.round(wx.feel)+"°"}</div>
+                <div style={{fontFamily:"'DSEG7Classic',monospace",fontSize:26,color:T.text,lineHeight:1,...(T.glow?{textShadow:"0 0 4px "+T.glowColor+",0 0 12px "+T.glowColor}:{})}}>{Math.round(wx.feel)+"°"}</div>
               </div>
               {/* HUM */}
-              <div className="no-sel" style={{textAlign:"center"}}>
+              <div className="no-sel" style={{flex:"1 1 0",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
                 <L t={T} sz={10}>HUMEDAD</L>
-                <div style={{fontFamily:"'DSEG7Classic',monospace",fontSize:26,color:T.text,lineHeight:1.3,marginTop:2,...(T.glow?{WebkitFilter:"drop-shadow(0 0 4px "+T.glowColor+")",filter:"drop-shadow(0 0 4px "+T.glowColor+")"}:{})}}>{wx.hum+"%"}</div>
+                <div style={{fontFamily:"'DSEG7Classic',monospace",fontSize:26,color:T.text,lineHeight:1,...(T.glow?{textShadow:"0 0 4px "+T.glowColor+",0 0 12px "+T.glowColor}:{})}}>{wx.hum+"%"}</div>
               </div>
-              {/* VIENTO — unit/dir absolutas, no afectan al layout */}
-              <div className="no-sel" style={{textAlign:"center"}}>
+              {/* VIENTO */}
+              <div className="no-sel" style={{flex:"1 1 0",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
                 <L t={T} sz={10}>VIENTO</L>
-                <div style={{position:"relative",display:"inline-block",marginTop:2}}>
-                  <span style={{fontFamily:"'DSEG7Classic',monospace",fontSize:26,color:T.text,lineHeight:1.3,display:"block",...(T.glow?{WebkitFilter:"drop-shadow(0 0 4px "+T.glowColor+")",filter:"drop-shadow(0 0 4px "+T.glowColor+")"}:{})}}>{Math.round(wx.wind)}</span>
-                  <span style={{position:"absolute",top:0,left:"100%",marginLeft:3,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:1,paddingTop:2}}>
-                    <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:T.mid,letterSpacing:".05em",lineHeight:1.15,whiteSpace:"nowrap"}}>km/h</span>
-                    <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:13,color:T.text,letterSpacing:".1em",lineHeight:1.15,whiteSpace:"nowrap",...(T.glow?{WebkitFilter:"drop-shadow(0 0 3px "+T.glowColor+")",filter:"drop-shadow(0 0 3px "+T.glowColor+")"}:{})}}>{windCompass(wx.windDir)}</span>
-                  </span>
+                <div style={{display:"flex",alignItems:"flex-end",gap:3}}>
+                  <span style={{fontFamily:"'DSEG7Classic',monospace",fontSize:26,color:T.text,lineHeight:1,...(T.glow?{textShadow:"0 0 4px "+T.glowColor+",0 0 12px "+T.glowColor}:{})}}>{Math.round(wx.wind)}</span>
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"flex-start",paddingBottom:2,gap:1}}>
+                    <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:T.mid,letterSpacing:".05em",lineHeight:1.1,whiteSpace:"nowrap"}}>km/h</span>
+                    <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:T.text,letterSpacing:".08em",lineHeight:1.1,whiteSpace:"nowrap",...(T.glow?{textShadow:"0 0 3px "+T.glowColor+",0 0 9px "+T.glowColor}:{})}}>{windCompass(wx.windDir)}</span>
+                  </div>
                 </div>
               </div>
-              {/* MIN/MAX */}
-              <div className="no-sel" style={{textAlign:"center",marginLeft:28}}>
+              {/* MÍN/MÁX */}
+              <div className="no-sel" style={{flex:"1 1 0",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
                 <L t={T} sz={10}>MÍN/MÁX</L>
-                <div style={{fontFamily:"'DSEG7Classic',monospace",fontSize:26,color:T.text,lineHeight:1.3,marginTop:2,...(T.glow?{WebkitFilter:"drop-shadow(0 0 4px "+T.glowColor+")",filter:"drop-shadow(0 0 4px "+T.glowColor+")"}:{})}}>{Math.round(wx.tempMin)+"/"+Math.round(wx.tempMax)+"°"}</div>
+                <div style={{fontFamily:"'DSEG7Classic',monospace",fontSize:26,color:T.text,lineHeight:1,...(T.glow?{textShadow:"0 0 4px "+T.glowColor+",0 0 12px "+T.glowColor}:{})}}>{Math.round(wx.tempMin)+"/"+Math.round(wx.tempMax)+"°"}</div>
               </div>
             </div>
           )}
@@ -383,7 +484,7 @@ function LCD(p){
         <div className="no-sel" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
           <L t={T} sz={11}>LUNA</L>
           <div style={{display:"flex",alignItems:"center",gap:9,marginTop:3}}>
-            <span style={{fontSize:30}}>{mIcons[mI]}</span>
+            <span style={{fontSize:30,lineHeight:1,display:"block"}}>{mIcons[mI]}</span>
             <L t={T} sz={15} col={T.mid}>{mNames[mI]}</L>
           </div>
         </div>
